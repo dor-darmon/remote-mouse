@@ -1,0 +1,14 @@
+# Python environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# IDE settings
+.idea/
+.vscode/
+
+# Build artifacts (PyInstaller)
+build/
+dist/
+*.spec
