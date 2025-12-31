@@ -11,9 +11,6 @@ import pyautogui
 from flask import Flask, render_template_string, request
 from flask_socketio import SocketIO, emit
 import logging
-import subprocess
-import shutil
-import re
 import time
 import os
 
@@ -23,24 +20,40 @@ try:
 except ImportError:
     psutil = None
 
+# --- New Library for Internet Access ---
+try:
+    from pyngrok import ngrok, conf
+except ImportError:
+    # Fallback/Installation instruction if missing
+    print("CRITICAL: Please run 'pip install pyngrok' to use Internet Mode")
+    ngrok = None
+
 # --- Server Configuration ---
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret_key'
-socketio = SocketIO(app, cors_allowed_origins="*")
+
+# --- Critical Fix: Use 'threading' mode ---
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 pyautogui.FAILSAFE = False
 SERVER_PIN = ''.join(random.choices(string.digits, k=4))
 authenticated_users = set()
+
+# ==========================================
+#  PASTE YOUR NGROK TOKEN HERE:
+# ==========================================
+NGROK_AUTH_TOKEN = "37d5xkghNBh7Aup7Ppe7XyOUSma_7MmA4f6e8t2rmYAbDX3hh"
+# ==========================================
 
 # --- Settings ---
 failed_attempts = 0
 MAX_ATTEMPTS = 3
 MOUSE_SENSITIVITY = 4.0
 
-# --- Client-side HTML ---
+# --- Client-side HTML (Unchanged) ---
 HTML_CLIENT = """
 <!DOCTYPE html>
 <html lang="en">
@@ -50,57 +63,38 @@ HTML_CLIENT = """
     <title>Pro Remote</title>
     <style>
         body { background-color: #121212; color: #00ffcc; font-family: sans-serif; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; transition: background 0.3s; }
-
-        /* Presentation Mode Style */
         body.presentation-mode { background-color: #0d1b2a; color: #4facfe; }
         body.presentation-mode .m-btn { border-color: #4facfe; color: #4facfe; }
         body.presentation-mode button.login-btn { background: #4facfe; }
-        body.presentation-mode .menu-media-btn:active { background: #4facfe; } /* Blue highlight in PPT mode */
 
-        /* Layout Elements */
         #login-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: inherit; z-index: 10; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         input.pin-input { padding: 15px; font-size: 24px; text-align: center; border-radius: 10px; border: 2px solid #00ffcc; background: #222; color: white; width: 60%; margin-bottom: 20px; }
         button.login-btn { padding: 15px 40px; font-size: 20px; background: #00ffcc; color: black; border: none; border-radius: 10px; font-weight: bold; }
 
         #app-interface { display: none; flex-direction: column; height: 100%; position: relative; }
-
-        /* Header / Menu */
         #top-bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: #1a1a1a; border-bottom: 1px solid #333; height: 50px; flex-shrink: 0; }
         #menu-btn { font-size: 24px; cursor: pointer; z-index: 20; padding: 10px;}
         #mode-label { font-weight: bold; font-size: 14px; text-transform: uppercase; }
 
-        /* Settings Menu Overlay */
-        #settings-menu {
-            position: absolute; top: 71px; left: 0; width: 100%; 
-            background: #1f1f1f; border-bottom: 2px solid #00ffcc;
-            display: none; flex-direction: column; padding: 20px; box-sizing: border-box; z-index: 100;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
-        }
-
+        #settings-menu { position: absolute; top: 71px; left: 0; width: 100%; background: #1f1f1f; border-bottom: 2px solid #00ffcc; display: none; flex-direction: column; padding: 20px; box-sizing: border-box; z-index: 100; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
         .setting-row { margin-bottom: 20px; display: flex; flex-direction: column; }
         .setting-label { font-size: 16px; margin-bottom: 10px; color: #fff; border-bottom: 1px solid #333; padding-bottom: 5px; }
 
-        /* Slider Styling */
         input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #00ffcc; margin-top: -8px; }
         input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; background: #555; border-radius: 2px; }
 
-        /* Toggle Button Styling */
         .toggle-btn { background: #333; border: 1px solid #555; color: white; padding: 15px; width: 100%; border-radius: 8px; font-size: 16px; cursor: pointer; }
         .toggle-btn.active { background: #4facfe; color: black; border-color: #4facfe; font-weight: bold; }
 
-        /* Media Controls in Menu */
         .menu-media-row { display: flex; justify-content: space-between; gap: 10px; }
         .menu-media-btn { flex: 1; background: #333; border: 1px solid #555; color: white; padding: 15px; border-radius: 8px; font-size: 20px; cursor: pointer; display: flex; justify-content: center; align-items: center; }
         .menu-media-btn:active { background: #00ffcc; color: black; }
 
-        /* Main Interface */
         #trackpad-container { flex-grow: 1; position: relative; display: flex; overflow: hidden; }
         #trackpad { flex-grow: 1; background: radial-gradient(circle, #2a2a2a 0%, #000000 100%); display: flex; justify-content: center; align-items: center; }
-
         #scroll-strip { width: 50px; background: rgba(255, 255, 255, 0.1); border-left: 1px solid #333; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         #scroll-strip i { opacity: 0.5; margin-bottom: 10px; }
-
         #mouse-buttons { height: 120px; display: flex; flex-shrink: 0; }
         .m-btn { flex: 1; display: flex; justify-content: center; align-items: center; font-size: 24px; border: 1px solid #333; background: #1a1a1a; color: white; }
         .m-btn:active { background: currentColor; color: black; }
@@ -132,12 +126,10 @@ HTML_CLIENT = """
                     <button class="menu-media-btn" onclick="media('vol_up')"><i class="fas fa-volume-up"></i></button>
                 </div>
             </div>
-
             <div class="setting-row">
                 <div class="setting-label">Mouse Sensitivity: <span id="sens-val">2.0</span></div>
                 <input type="range" min="0.5" max="6.0" step="0.5" value="2.0" oninput="updateSensitivity(this.value)">
             </div>
-
             <div class="setting-row">
                 <button id="ppt-toggle" class="toggle-btn" onclick="togglePresentationMode()">
                     Enable Presentation Mode
@@ -163,7 +155,7 @@ HTML_CLIENT = """
     </div>
 
     <script>
-        const socket = io();
+        const socket = io({transports: ['websocket', 'polling']});
         let authenticated = false;
         let presentationMode = false;
 
@@ -186,11 +178,7 @@ HTML_CLIENT = """
 
         function toggleMenu() {
             const menu = document.getElementById('settings-menu');
-            if(menu.style.display === 'flex') {
-                menu.style.display = 'none';
-            } else {
-                menu.style.display = 'flex';
-            }
+            menu.style.display = (menu.style.display === 'flex') ? 'none' : 'flex';
         }
 
         function updateSensitivity(val) {
@@ -224,14 +212,12 @@ HTML_CLIENT = """
                 btn.classList.remove('active');
                 btn.innerText = "Enable Presentation Mode";
             }
-            // Close menu
             document.getElementById('settings-menu').style.display = 'none';
         }
 
-        socket.on('disconnect', () => { if(authenticated) alert("Server disconnected"); });
+        socket.on('disconnect', () => {});
         function media(action) { if(authenticated) socket.emit('media_control', {action: action}); }
 
-        // --- Trackpad Logic ---
         const pad = document.getElementById('trackpad');
         let lx=0, ly=0, touch=false, lastTapTime=0, isDragging=false;
 
@@ -262,7 +248,6 @@ HTML_CLIENT = """
             if (isDragging) { socket.emit('mouse_up', {}); isDragging = false; }
         });
 
-        // --- Scroll Strip Logic ---
         const scrollStrip = document.getElementById('scroll-strip');
         let sy = 0;
         scrollStrip.addEventListener('touchstart', e => {
@@ -280,7 +265,6 @@ HTML_CLIENT = """
             sy = cy;
         }, {passive: false});
 
-        // --- Buttons ---
         document.getElementById('l-btn').addEventListener('click', () => { 
             if(!authenticated) return;
             if(presentationMode) socket.emit('ppt_ctrl', {cmd: 'next'});
@@ -425,7 +409,9 @@ class MouseApp:
 
         self.modes = ['wifi', 'bluetooth', 'network']
         self.current_mode = 'wifi'
-        self.ssh_process = None
+
+        # Ngrok setup
+        self.active_tunnel = None
         self.url = f"http://{get_local_ip()}:5000"
 
         tk.Label(root, text="Pro Mouse Server", font=("Helvetica", 22, "bold"), bg="#2c3e50", fg="white").pack(pady=15)
@@ -467,18 +453,23 @@ class MouseApp:
         next_idx = (self.modes.index(self.current_mode) + 1) % len(self.modes)
         self.set_mode(self.modes[next_idx])
 
+    def close_ngrok(self):
+        if self.active_tunnel:
+            ngrok.disconnect(self.active_tunnel.public_url)
+            self.active_tunnel = None
+
     def set_mode(self, mode):
         self.current_mode = mode
-        if self.ssh_process:
-            self.ssh_process.terminate()
-            self.ssh_process = None
+        # Always close tunnel when switching modes
+        self.close_ngrok()
 
         if mode == 'wifi':
             ip = get_local_ip()
             self.url = f"http://{ip}:5000"
             self.btn_mode.configure(text="Mode: WI-FI", bg="#27ae60")
-            self.lbl_msg.configure(text="Standard local connection", fg="#f39c12")
+            self.lbl_msg.configure(text="Local Connection (Same Wi-Fi)", fg="#f39c12")
             self.update_ui()
+
         elif mode == 'bluetooth':
             self.btn_mode.configure(text="Mode: BLUETOOTH", bg="#2980b9")
             ip = get_bluetooth_ip()
@@ -489,34 +480,39 @@ class MouseApp:
                 self.url = f"http://{get_local_ip()}:5000"
                 self.lbl_msg.configure(text="BT Tethering NOT FOUND!", fg="#e74c3c")
             self.update_ui()
+
         elif mode == 'network':
             self.btn_mode.configure(text="Mode: INTERNET", bg="#8e44ad")
-            if not shutil.which("ssh"):
-                self.lbl_msg.configure(text="Error: OpenSSH missing", fg="red")
+            if not ngrok:
+                self.lbl_msg.configure(text="Error: pyngrok missing", fg="red")
                 return
-            self.lbl_msg.configure(text="Running SSH Command...", fg="#f1c40f")
-            self.root.update()
-            threading.Thread(target=self.start_ssh_tunnel, daemon=True).start()
 
-    def start_ssh_tunnel(self):
+            self.lbl_msg.configure(text="Connecting to Cloud...", fg="#f1c40f")
+            self.root.update()
+
+            # Start Ngrok Tunnel in a thread to keep UI responsive
+            threading.Thread(target=self.start_ngrok_tunnel, daemon=True).start()
+
+    def start_ngrok_tunnel(self):
         try:
-            cmd = ["ssh", "-p", "443", "-R0:localhost:5000", "a.pinggy.io", "-o", "StrictHostKeyChecking=no"]
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            self.ssh_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                                startupinfo=startupinfo, bufsize=1, universal_newlines=True)
-            url_pattern = re.compile(r'(https?://[a-zA-Z0-9.-]+\.pinggy\.(?:io|link))')
-            while True:
-                line = self.ssh_process.stdout.readline()
-                if not line: break
-                match = url_pattern.search(line)
-                if match:
-                    self.url = match.group(1).replace("http://", "https://")
-                    self.lbl_msg.configure(text="Online! (Pinggy)", fg="#2ecc71")
-                    self.update_ui()
-                    break
-        except Exception:
-            self.lbl_msg.configure(text="SSH Error", fg="red")
+            # Set token
+            if "YOUR_NGROK_TOKEN_HERE" in NGROK_AUTH_TOKEN:
+                self.lbl_msg.configure(text="Error: TOKEN MISSING IN CODE", fg="red")
+                return
+
+            ngrok.set_auth_token(NGROK_AUTH_TOKEN)
+
+            # Open HTTP tunnel on port 5000
+            self.active_tunnel = ngrok.connect(5000)
+            self.url = self.active_tunnel.public_url
+
+            print(f"Ngrok Tunnel Active: {self.url}")
+            self.lbl_msg.configure(text="Online! (Internet Mode)", fg="#2ecc71")
+            self.update_ui()
+
+        except Exception as e:
+            print(f"Ngrok Error: {e}")
+            self.lbl_msg.configure(text="Cloud Error (Check Token)", fg="red")
 
     def update_ui(self):
         self.root.after(0, self.generate_qr)
