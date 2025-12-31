@@ -37,7 +37,7 @@
     ```
 
 ### Option B: Run via EXE (Windows)
-1.  Download the `ProMouseServer.exe` from the Releases section.
+1.  Download the `ProMouseServer.exe` from the dis folder .
 2.  Run the file (Allow access in Windows Firewall if prompted).
 3.  Scan the QR code with your phone.
 
@@ -48,10 +48,17 @@
 2.  Ensure both PC and Phone are on the **same WiFi network**.
 3.  Scan the QR code displayed on the desktop app.
 4.  Enter the 4-digit PIN shown on the screen.
-5.  **Controls:**
-    * **Move:** Slide finger on trackpad.
-    * **Left Click:** Tap buttons or double-tap trackpad.
-    * **Drag:** Double-tap and hold, then move finger.
-
-##  License
-This project is open-source and available under the MIT License.
+5.  **Mouse Mode (Default)**
+Move: Slide finger on the main trackpad area.
+Scroll: Slide finger up/down on the vertical strip on the right.
+Left Click: Tap the trackpad or press the L button.
+Right Click: Press the R button.
+Drag: Double-tap and hold on the trackpad, then move.
+Presentation Mode
+Toggle this mode via the top-left menu (Hamburger icon).
+NEXT Button: Advances to the next slide (simulates Right Arrow).
+PREV Button: Goes back to the previous slide (simulates Left Arrow).
+Settings Menu (Top-Left Icon)
+Media Controls: Adjust Volume Up/Down and Play/Pause.
+Sensitivity: Adjust the slider to change how fast the mouse cursor moves.
+Mode Toggle: Switch between Mouse Mode and Presentation Mode.
