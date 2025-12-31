@@ -15,7 +15,7 @@ import subprocess
 import shutil
 import re
 import time
-import os  # Added os library to close the process
+import os
 
 # --- Library Check ---
 try:
@@ -35,9 +35,10 @@ pyautogui.FAILSAFE = False
 SERVER_PIN = ''.join(random.choices(string.digits, k=4))
 authenticated_users = set()
 
-# --- New Security Settings ---
+# --- Settings ---
 failed_attempts = 0
-MAX_ATTEMPTS = 3  # Maximum allowed attempts
+MAX_ATTEMPTS = 3
+MOUSE_SENSITIVITY = 4.0
 
 # --- Client-side HTML ---
 HTML_CLIENT = """
@@ -48,18 +49,61 @@ HTML_CLIENT = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Pro Remote</title>
     <style>
-        body { background-color: #121212; color: #00ffcc; font-family: sans-serif; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
-        #login-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #121212; z-index: 10; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-        input { padding: 15px; font-size: 24px; text-align: center; border-radius: 10px; border: 2px solid #00ffcc; background: #222; color: white; width: 60%; margin-bottom: 20px; }
+        body { background-color: #121212; color: #00ffcc; font-family: sans-serif; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; transition: background 0.3s; }
+
+        /* Presentation Mode Style */
+        body.presentation-mode { background-color: #0d1b2a; color: #4facfe; }
+        body.presentation-mode .m-btn { border-color: #4facfe; color: #4facfe; }
+        body.presentation-mode button.login-btn { background: #4facfe; }
+        body.presentation-mode .menu-media-btn:active { background: #4facfe; } /* Blue highlight in PPT mode */
+
+        /* Layout Elements */
+        #login-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: inherit; z-index: 10; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        input.pin-input { padding: 15px; font-size: 24px; text-align: center; border-radius: 10px; border: 2px solid #00ffcc; background: #222; color: white; width: 60%; margin-bottom: 20px; }
         button.login-btn { padding: 15px 40px; font-size: 20px; background: #00ffcc; color: black; border: none; border-radius: 10px; font-weight: bold; }
-        #app-interface { display: none; flex-direction: column; height: 100%; }
-        #media-controls { display: flex; justify-content: space-around; padding: 15px; background: #1a1a1a; border-bottom: 1px solid #333; }
-        .media-btn { background: #333; color: white; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; display: flex; justify-content: center; align-items: center; }
-        .media-btn:active { background: #00ffcc; color: black; }
+
+        #app-interface { display: none; flex-direction: column; height: 100%; position: relative; }
+
+        /* Header / Menu */
+        #top-bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: #1a1a1a; border-bottom: 1px solid #333; height: 50px; flex-shrink: 0; }
+        #menu-btn { font-size: 24px; cursor: pointer; z-index: 20; padding: 10px;}
+        #mode-label { font-weight: bold; font-size: 14px; text-transform: uppercase; }
+
+        /* Settings Menu Overlay */
+        #settings-menu {
+            position: absolute; top: 71px; left: 0; width: 100%; 
+            background: #1f1f1f; border-bottom: 2px solid #00ffcc;
+            display: none; flex-direction: column; padding: 20px; box-sizing: border-box; z-index: 100;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+        }
+
+        .setting-row { margin-bottom: 20px; display: flex; flex-direction: column; }
+        .setting-label { font-size: 16px; margin-bottom: 10px; color: #fff; border-bottom: 1px solid #333; padding-bottom: 5px; }
+
+        /* Slider Styling */
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #00ffcc; margin-top: -8px; }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; background: #555; border-radius: 2px; }
+
+        /* Toggle Button Styling */
+        .toggle-btn { background: #333; border: 1px solid #555; color: white; padding: 15px; width: 100%; border-radius: 8px; font-size: 16px; cursor: pointer; }
+        .toggle-btn.active { background: #4facfe; color: black; border-color: #4facfe; font-weight: bold; }
+
+        /* Media Controls in Menu */
+        .menu-media-row { display: flex; justify-content: space-between; gap: 10px; }
+        .menu-media-btn { flex: 1; background: #333; border: 1px solid #555; color: white; padding: 15px; border-radius: 8px; font-size: 20px; cursor: pointer; display: flex; justify-content: center; align-items: center; }
+        .menu-media-btn:active { background: #00ffcc; color: black; }
+
+        /* Main Interface */
+        #trackpad-container { flex-grow: 1; position: relative; display: flex; overflow: hidden; }
         #trackpad { flex-grow: 1; background: radial-gradient(circle, #2a2a2a 0%, #000000 100%); display: flex; justify-content: center; align-items: center; }
-        #mouse-buttons { height: 90px; display: flex; }
+
+        #scroll-strip { width: 50px; background: rgba(255, 255, 255, 0.1); border-left: 1px solid #333; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        #scroll-strip i { opacity: 0.5; margin-bottom: 10px; }
+
+        #mouse-buttons { height: 120px; display: flex; flex-shrink: 0; }
         .m-btn { flex: 1; display: flex; justify-content: center; align-items: center; font-size: 24px; border: 1px solid #333; background: #1a1a1a; color: white; }
-        .m-btn:active { background: #00ffcc; color: black; }
+        .m-btn:active { background: currentColor; color: black; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -67,20 +111,51 @@ HTML_CLIENT = """
 <body>
     <div id="login-screen">
         <h2>Enter PIN</h2>
-        <input type="tel" id="pin-input" maxlength="4" placeholder="****">
+        <input type="tel" id="pin-input" class="pin-input" maxlength="4" placeholder="****">
         <button class="login-btn" onclick="login()">CONNECT</button>
         <p id="msg" style="color:red; display:none;">Wrong PIN</p>
     </div>
 
     <div id="app-interface">
-        <div id="media-controls">
-            <button class="media-btn" onclick="media('vol_down')"><i class="fas fa-volume-down"></i></button>
-            <button class="media-btn" onclick="media('playpause')"><i class="fas fa-play"></i></button>
-            <button class="media-btn" onclick="media('vol_up')"><i class="fas fa-volume-up"></i></button>
+        <div id="top-bar">
+            <div id="menu-btn" onclick="toggleMenu()"><i class="fas fa-bars"></i></div>
+            <div id="mode-label">MOUSE MODE</div>
+            <div style="width: 24px;"></div>
         </div>
-        <div id="trackpad">
-            <i class="fas fa-fingerprint" style="opacity: 0.2; font-size: 60px;"></i>
+
+        <div id="settings-menu">
+            <div class="setting-row">
+                <div class="setting-label">Media Controls</div>
+                <div class="menu-media-row">
+                    <button class="menu-media-btn" onclick="media('vol_down')"><i class="fas fa-volume-down"></i></button>
+                    <button class="menu-media-btn" onclick="media('playpause')"><i class="fas fa-play"></i></button>
+                    <button class="menu-media-btn" onclick="media('vol_up')"><i class="fas fa-volume-up"></i></button>
+                </div>
+            </div>
+
+            <div class="setting-row">
+                <div class="setting-label">Mouse Sensitivity: <span id="sens-val">2.0</span></div>
+                <input type="range" min="0.5" max="6.0" step="0.5" value="2.0" oninput="updateSensitivity(this.value)">
+            </div>
+
+            <div class="setting-row">
+                <button id="ppt-toggle" class="toggle-btn" onclick="togglePresentationMode()">
+                    Enable Presentation Mode
+                </button>
+            </div>
         </div>
+
+        <div id="trackpad-container">
+            <div id="trackpad">
+                <i id="mode-icon" class="fas fa-fingerprint" style="opacity: 0.2; font-size: 60px;"></i>
+            </div>
+            <div id="scroll-strip">
+                <i class="fas fa-chevron-up"></i>
+                <i class="fas fa-arrows-alt-v"></i>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+        </div>
+
         <div id="mouse-buttons">
             <div class="m-btn" id="l-btn">L</div>
             <div class="m-btn" id="r-btn">R</div>
@@ -90,6 +165,7 @@ HTML_CLIENT = """
     <script>
         const socket = io();
         let authenticated = false;
+        let presentationMode = false;
 
         function login() {
             const pin = document.getElementById('pin-input').value;
@@ -108,15 +184,54 @@ HTML_CLIENT = """
             }
         });
 
-        // Handle server disconnection
-        socket.on('disconnect', () => {
-             if(authenticated) alert("Server disconnected");
-        });
-
-        function media(action) {
-            if(authenticated) socket.emit('media_control', {action: action});
+        function toggleMenu() {
+            const menu = document.getElementById('settings-menu');
+            if(menu.style.display === 'flex') {
+                menu.style.display = 'none';
+            } else {
+                menu.style.display = 'flex';
+            }
         }
 
+        function updateSensitivity(val) {
+            document.getElementById('sens-val').innerText = val;
+            if(authenticated) socket.emit('set_sensitivity', {value: val});
+        }
+
+        function togglePresentationMode() {
+            presentationMode = !presentationMode;
+            const body = document.body;
+            const label = document.getElementById('mode-label');
+            const icon = document.getElementById('mode-icon');
+            const lBtn = document.getElementById('l-btn');
+            const rBtn = document.getElementById('r-btn');
+            const btn = document.getElementById('ppt-toggle');
+
+            if(presentationMode) {
+                body.classList.add('presentation-mode');
+                label.innerText = "PRESENTATION";
+                icon.className = "fas fa-tv";
+                lBtn.innerText = "NEXT ➡";
+                rBtn.innerText = "⬅ PREV";
+                btn.classList.add('active');
+                btn.innerText = "Disable Presentation Mode";
+            } else {
+                body.classList.remove('presentation-mode');
+                label.innerText = "MOUSE MODE";
+                icon.className = "fas fa-fingerprint";
+                lBtn.innerText = "L";
+                rBtn.innerText = "R";
+                btn.classList.remove('active');
+                btn.innerText = "Enable Presentation Mode";
+            }
+            // Close menu
+            document.getElementById('settings-menu').style.display = 'none';
+        }
+
+        socket.on('disconnect', () => { if(authenticated) alert("Server disconnected"); });
+        function media(action) { if(authenticated) socket.emit('media_control', {action: action}); }
+
+        // --- Trackpad Logic ---
         const pad = document.getElementById('trackpad');
         let lx=0, ly=0, touch=false, lastTapTime=0, isDragging=false;
 
@@ -127,7 +242,7 @@ HTML_CLIENT = """
             lx=e.touches[0].clientX; 
             ly=e.touches[0].clientY; 
             const currentTime = new Date().getTime();
-            if (currentTime - lastTapTime < 300) {
+            if (currentTime - lastTapTime < 300 && !presentationMode) {
                 socket.emit('mouse_down', {});
                 isDragging = true;
             }
@@ -147,8 +262,36 @@ HTML_CLIENT = """
             if (isDragging) { socket.emit('mouse_up', {}); isDragging = false; }
         });
 
-        document.getElementById('l-btn').addEventListener('click', () => { if(authenticated) socket.emit('clk', {b:'left'}); });
-        document.getElementById('r-btn').addEventListener('click', () => { if(authenticated) socket.emit('clk', {b:'right'}); });
+        // --- Scroll Strip Logic ---
+        const scrollStrip = document.getElementById('scroll-strip');
+        let sy = 0;
+        scrollStrip.addEventListener('touchstart', e => {
+            if(!authenticated) return;
+            e.preventDefault();
+            sy = e.touches[0].clientY;
+        }, {passive: false});
+
+        scrollStrip.addEventListener('touchmove', e => {
+            if(!authenticated) return;
+            e.preventDefault();
+            let cy = e.touches[0].clientY;
+            let delta = sy - cy; 
+            socket.emit('scroll', {dy: delta});
+            sy = cy;
+        }, {passive: false});
+
+        // --- Buttons ---
+        document.getElementById('l-btn').addEventListener('click', () => { 
+            if(!authenticated) return;
+            if(presentationMode) socket.emit('ppt_ctrl', {cmd: 'next'});
+            else socket.emit('clk', {b:'left'}); 
+        });
+
+        document.getElementById('r-btn').addEventListener('click', () => { 
+            if(!authenticated) return;
+            if(presentationMode) socket.emit('ppt_ctrl', {cmd: 'prev'});
+            else socket.emit('clk', {b:'right'}); 
+        });
     </script>
 </body>
 </html>
@@ -160,26 +303,32 @@ HTML_CLIENT = """
 def index(): return render_template_string(HTML_CLIENT)
 
 
-# --- Security and Auth Logic (Modified Section) ---
 @socketio.on('auth')
 def h_auth(data):
     global failed_attempts
-
     if data['pin'] == SERVER_PIN:
-        failed_attempts = 0  # Reset counter on success
+        failed_attempts = 0
         authenticated_users.add(request.sid)
         emit('auth_res', {'ok': True})
     else:
         failed_attempts += 1
-        print(f"Failed Login Attempt: {failed_attempts}/{MAX_ATTEMPTS}")
-
+        print(f"Failed Login: {failed_attempts}/{MAX_ATTEMPTS}")
         if failed_attempts >= MAX_ATTEMPTS:
-            print("Security Alert: Max attempts reached. Shutting down server.")
-            emit('auth_res', {'ok': False, 'msg': 'Server shutting down due to security breach'})
-            # Forcefully close the entire process (including GUI)
+            emit('auth_res', {'ok': False, 'msg': 'Server locked'})
             os._exit(0)
         else:
-            emit('auth_res', {'ok': False, 'msg': f'Wrong PIN ({failed_attempts}/{MAX_ATTEMPTS})'})
+            emit('auth_res', {'ok': False, 'msg': 'Wrong PIN'})
+
+
+@socketio.on('set_sensitivity')
+def h_sens(data):
+    global MOUSE_SENSITIVITY
+    if request.sid in authenticated_users:
+        try:
+            val = float(data['value'])
+            MOUSE_SENSITIVITY = val
+        except:
+            pass
 
 
 @socketio.on('mouse_down')
@@ -196,7 +345,9 @@ def handle_mouse_up(data):
 def h_mv(data):
     if request.sid in authenticated_users:
         try:
-            pyautogui.moveRel(float(data['dx']) * 2.0, float(data['dy']) * 2.0)
+            dx = float(data['dx']) * MOUSE_SENSITIVITY
+            dy = float(data['dy']) * MOUSE_SENSITIVITY
+            pyautogui.moveRel(dx, dy)
         except:
             pass
 
@@ -204,6 +355,26 @@ def h_mv(data):
 @socketio.on('clk')
 def h_clk(data):
     if request.sid in authenticated_users: pyautogui.click(button=data['b'])
+
+
+@socketio.on('scroll')
+def h_scroll(data):
+    if request.sid in authenticated_users:
+        try:
+            amount = int(float(data['dy']) * 2)
+            pyautogui.scroll(amount)
+        except:
+            pass
+
+
+@socketio.on('ppt_ctrl')
+def h_ppt(data):
+    if request.sid in authenticated_users:
+        cmd = data['cmd']
+        if cmd == 'next':
+            pyautogui.press('right')
+        elif cmd == 'prev':
+            pyautogui.press('left')
 
 
 @socketio.on('media_control')
@@ -218,7 +389,7 @@ def h_media(data):
             pyautogui.press('playpause')
 
 
-# --- Smart Network Logic ---
+# --- Network & GUI ---
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -237,9 +408,7 @@ def get_bluetooth_ip():
         for snic in snics:
             if snic.family == socket.AF_INET:
                 ip = snic.address
-                # Detect Android/iPhone hotspot ranges
-                if ip.startswith('192.168.44') or ip.startswith('172.20.10'):
-                    return ip
+                if ip.startswith('192.168.44') or ip.startswith('172.20.10'): return ip
     return None
 
 
@@ -247,7 +416,6 @@ def start_flask_server():
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
 
 
-# --- Graphical User Interface (GUI) ---
 class MouseApp:
     def __init__(self, root):
         self.root = root
@@ -260,61 +428,47 @@ class MouseApp:
         self.ssh_process = None
         self.url = f"http://{get_local_ip()}:5000"
 
-        # HEADER
-        lbl_title = tk.Label(root, text="Pro Mouse Server", font=("Helvetica", 22, "bold"), bg="#2c3e50", fg="white")
-        lbl_title.pack(pady=15)
+        tk.Label(root, text="Pro Mouse Server", font=("Helvetica", 22, "bold"), bg="#2c3e50", fg="white").pack(pady=15)
 
-        # BUTTON: TOGGLE MODE
         self.btn_mode = tk.Button(root, text="Mode: WI-FI", font=("Arial", 14, "bold"),
                                   bg="#27ae60", fg="white", width=25, height=2, command=self.cycle_mode)
         self.btn_mode.pack(pady=10)
 
-        # PIN DISPLAY
         frame_pin = tk.Frame(root, bg="#34495e", padx=20, pady=10)
         frame_pin.pack(pady=5, fill="x", padx=20)
         tk.Label(frame_pin, text="ACCESS PIN:", font=("Arial", 10), bg="#34495e", fg="#bdc3c7").pack()
         self.lbl_pin = tk.Label(frame_pin, text=SERVER_PIN, font=("Courier", 36, "bold"), bg="#34495e", fg="#e74c3c")
         self.lbl_pin.pack()
 
-        # QR CODE SECTION
         self.qr_frame = tk.Frame(root, bg="#2c3e50")
         self.qr_frame.pack(pady=10)
         self.lbl_qr = tk.Label(self.qr_frame, bg="#2c3e50")
         self.lbl_qr.pack()
 
-        # STATUS MESSAGE
         self.lbl_msg = tk.Label(root, text="Connected to Wi-Fi", font=("Arial", 10), bg="#2c3e50", fg="#f39c12")
         self.lbl_msg.pack()
 
-        # MANUAL CONNECT
         frame_manual = tk.Frame(root, bg="#2c3e50", pady=10)
         frame_manual.pack(fill="x")
         self.entry_url = tk.Entry(frame_manual, font=("Arial", 12), justify="center", width=30, bg="#ecf0f1",
                                   fg="#2c3e50")
         self.entry_url.pack(pady=5)
-
-        btn_copy = tk.Button(frame_manual, text="Copy Link", font=("Arial", 10), command=self.copy_to_clipboard,
-                             bg="#2980b9", fg="white", relief="flat")
-        btn_copy.pack(pady=2)
+        tk.Button(frame_manual, text="Copy Link", font=("Arial", 10), command=self.copy_to_clipboard, bg="#2980b9",
+                  fg="white", relief="flat").pack(pady=2)
 
         self.lbl_status = tk.Label(root, text="Server Running...", font=("Arial", 10), bg="#2c3e50", fg="#f1c40f")
         self.lbl_status.pack(side="bottom", pady=15)
 
         self.generate_qr()
         self.update_entry()
-
-        self.server_thread = threading.Thread(target=start_flask_server, daemon=True)
-        self.server_thread.start()
+        threading.Thread(target=start_flask_server, daemon=True).start()
 
     def cycle_mode(self):
         next_idx = (self.modes.index(self.current_mode) + 1) % len(self.modes)
-        new_mode = self.modes[next_idx]
-        self.set_mode(new_mode)
+        self.set_mode(self.modes[next_idx])
 
     def set_mode(self, mode):
         self.current_mode = mode
-
-        # Close process if exists
         if self.ssh_process:
             self.ssh_process.terminate()
             self.ssh_process = None
@@ -325,7 +479,6 @@ class MouseApp:
             self.btn_mode.configure(text="Mode: WI-FI", bg="#27ae60")
             self.lbl_msg.configure(text="Standard local connection", fg="#f39c12")
             self.update_ui()
-
         elif mode == 'bluetooth':
             self.btn_mode.configure(text="Mode: BLUETOOTH", bg="#2980b9")
             ip = get_bluetooth_ip()
@@ -333,70 +486,37 @@ class MouseApp:
                 self.url = f"http://{ip}:5000"
                 self.lbl_msg.configure(text="Bluetooth IP Found", fg="#f39c12")
             else:
-                current_ip = get_local_ip()
-                self.url = f"http://{current_ip}:5000"
-                self.lbl_msg.configure(text="BT Tethering NOT FOUND! (Using WiFi IP)", fg="#e74c3c")
+                self.url = f"http://{get_local_ip()}:5000"
+                self.lbl_msg.configure(text="BT Tethering NOT FOUND!", fg="#e74c3c")
             self.update_ui()
-
         elif mode == 'network':
             self.btn_mode.configure(text="Mode: INTERNET", bg="#8e44ad")
-
             if not shutil.which("ssh"):
-                self.lbl_msg.configure(text="Error: OpenSSH missing in Windows", fg="red")
+                self.lbl_msg.configure(text="Error: OpenSSH missing", fg="red")
                 return
-
-            self.lbl_msg.configure(text="Running SSH Command... Wait...", fg="#f1c40f")
+            self.lbl_msg.configure(text="Running SSH Command...", fg="#f1c40f")
             self.root.update()
-
             threading.Thread(target=self.start_ssh_tunnel, daemon=True).start()
 
     def start_ssh_tunnel(self):
         try:
-            # The exact command requested
             cmd = ["ssh", "-p", "443", "-R0:localhost:5000", "a.pinggy.io", "-o", "StrictHostKeyChecking=no"]
-
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            # Combine STDOUT and STDERR to capture everything
-            self.ssh_process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Important - merges errors and standard output
-                text=True,
-                startupinfo=startupinfo,
-                bufsize=1,  # Line buffered
-                universal_newlines=True
-            )
-
-            print("SSH Command Executed. Listening for URL...")
-
-            # Regex to catch any HTTP/HTTPS URL containing pinggy
+            self.ssh_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                                startupinfo=startupinfo, bufsize=1, universal_newlines=True)
             url_pattern = re.compile(r'(https?://[a-zA-Z0-9.-]+\.pinggy\.(?:io|link))')
-
-            # Read output in real-time
             while True:
                 line = self.ssh_process.stdout.readline()
-                if not line:
-                    break
-
-                print(f"SSH Output: {line.strip()}")  # Debug print
-
+                if not line: break
                 match = url_pattern.search(line)
                 if match:
-                    found_url = match.group(1)
-                    # Ensure HTTPS
-                    if "http://" in found_url:
-                        found_url = found_url.replace("http://", "https://")
-
-                    self.url = found_url
+                    self.url = match.group(1).replace("http://", "https://")
                     self.lbl_msg.configure(text="Online! (Pinggy)", fg="#2ecc71")
                     self.update_ui()
-                    break  # Stop searching once found
-
-        except Exception as e:
-            print(f"SSH Error: {e}")
-            self.lbl_msg.configure(text=f"SSH Error", fg="red")
+                    break
+        except Exception:
+            self.lbl_msg.configure(text="SSH Error", fg="red")
 
     def update_ui(self):
         self.root.after(0, self.generate_qr)
@@ -420,7 +540,7 @@ class MouseApp:
         if self.url:
             self.root.clipboard_clear()
             self.root.clipboard_append(self.url)
-            messagebox.showinfo("Copied", "URL copied to clipboard!")
+            messagebox.showinfo("Copied", "URL copied")
 
 
 if __name__ == "__main__":
