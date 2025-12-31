@@ -10,7 +10,7 @@
 * **Secure Connection:** Random PIN generation for secure access.
 * **QR Code Pairing:** Scan and connect instantly without typing IP addresses.
 
-## 🛠️ Built With
+##  Built With
 * **Python 3.13**
 * **Flask & Flask-SocketIO** (Server & Communication)
 * **PyAutoGUI** (Mouse/Keyboard Automation)
