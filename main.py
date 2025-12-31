@@ -45,7 +45,7 @@ authenticated_users = set()
 # ==========================================
 #  PASTE YOUR NGROK TOKEN HERE:
 # ==========================================
-NGROK_AUTH_TOKEN = "37d5xkghNBh7Aup7Ppe7XyOUSma_7MmA4f6e8t2rmYAbDX3hh"
+NGROK_AUTH_TOKEN = ""
 # ==========================================
 
 # --- Settings ---
